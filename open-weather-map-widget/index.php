@@ -1,0 +1,1 @@
+<?php // Security by obscurity is poor man's choice instead of using a proper configuration.
