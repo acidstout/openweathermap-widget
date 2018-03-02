@@ -63,7 +63,7 @@ class Weather {
 	private $_show_stats     = 0;
 	private $_show_link      = 0;
 	private $_weather_data   = array();
-	private	$_windSpeedUnit = 'km/h';
+	private	$_windSpeedUnit  = 'km/h';
 	
 	
 	/**
@@ -179,7 +179,7 @@ class Weather {
 	private function _getWeatherData() {
 		$transient = 'weather-' . $this->_units . '-' . $this->_slug;
 		
-		// Fetched cached data.
+		// Fetched cached data. Contains current weather and forecast.
 		if (Weather::_DEBUG) {
 			error_log('Skipping transient weather data.', 0);
 		} else {
@@ -244,8 +244,12 @@ class Weather {
 	private function _weather_logic() {
 		$output = '';
 		$wind_direction = '';
+		
+		// Decide which unit to use.
 		$units_display = ($this->_units == "metric") ? __('C', 'weather') : __('F', 'weather');
 
+		
+		// Return a message if no location has been set.
 		if (!$this->_location) {
 			return $this->_weather_error(__('City not set.', 'weather'));
 		}
@@ -255,7 +259,7 @@ class Weather {
 		$this->_slug = sanitize_title($this->_location);
 		$this->_city_id = $this->_location;
 		
-		if (!is_numeric($this->_location)) {
+		if (!is_numeric($this->_city_id)) {
 			$this->_city_id = $this->_getCityId();
 		}
 		
@@ -283,10 +287,14 @@ class Weather {
 		$today_low 	= number_format($today->main->temp_min, 1);
 		$feels		= $today->weather[0]->id;
 		
+		// Use configured city name (if it's not a city ID) instead of the name returned by the API call.
+		// This will preserve accents in the city name.
+		$header_title = (!is_numeric($this->_location)) ? $this->_location : $today->name;
 		
 		// Override location name?
-		$header_title = ($this->_override_title) ? $this->_override_title : $today->name;
-		
+		if ($this->_override_title) {
+			$header_title = $this->_override_title;
+		}
 		
 		// The OpenWeatherMap API returns wind speed in "m/s" when requesting metric units.
 		// So, we need to convert it to "km/h". 
@@ -359,25 +367,30 @@ class Weather {
 			$output .= '<div class="weather-forecast days_' . $this->_days_to_show . '">';
 			$day_count = 1;
 			$dt_today = date('Ymd');
-			$forecast = $this->_weather_data['forecast'];
+			$forecast = $this->_weather_data['forecast'];	// Contains the actual forecast data.
 			$day_of_week = '';
 			$day_of_week_prev = '';
 			
 			foreach((array)$forecast->list as $forecast) {
+				// Get day of the week of the forecast data.
 				$day_of_week = date('D', $forecast->dt);
 				
+				// Todays date is the date in the forecast, then skip.
 				if ($dt_today >= date('Ymd', $forecast->dt)) {
 					continue;
 				}
 				
+				// Skip weather data if we already display that day.
 				if ($day_of_week == $day_of_week_prev && !empty($day_of_week_prev)) {
 					continue;
 				}
 				
+				// Skip weather data if its time is not noon.
 				if (date('Hi', $forecast->dt) != '1200') {
 					continue;
 				}
 
+				// Add forecast entry to our output.
 				$output .= '
 					<div class="weather-forecast-day" title="' . $forecast->weather[0]->description . '">
 						<div><img src="' . $this->_weather_icon_urls['small'] . $forecast->weather[0]->icon . '.png" alt=""/></div>
@@ -385,18 +398,22 @@ class Weather {
 						<div class="weather-forecast-day-abbr">' . $day_of_week . '</div>
 					</div>';
 				
+				// Break the foreach-loop if the number of days to display is reached.
 				if ($day_count == $this->_days_to_show) {
 					break;
 				}
 				
+				// Remember current day as the "previous" day. 
 				$day_of_week_prev = $day_of_week;
+				
+				// Count up.
 				$day_count++;
 			}
 			
 			$output .= '</div>';
 		}
 		
-		$output .= '</div>';
+		$output .= '</div>';	// Close <div id="weather-' . $this->_slug . '" ...>
 		return $output;
 	}
 }
@@ -443,6 +460,8 @@ class owm_weather_widget extends WP_Widget {
 		$show_link 		= isset($instance['show_link']) ? $instance['show_link'] : 0;
 
 		echo $before_widget;
+		
+		// Create a new Weather object
 		$weather = new Weather(
 			array(
 				'location' => $location,
@@ -455,7 +474,9 @@ class owm_weather_widget extends WP_Widget {
 			)
 		);
 		
+		// Get weather data.
 		echo $weather->getWeatherData();
+		
 		echo $after_widget;
 	}
  
