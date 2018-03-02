@@ -17,6 +17,9 @@ The provided API key is connected to a free account for demo purposes only. In o
 
 `[weather location="2657896" openweathermap_api_key="<insert your API key here>"]`
 
+
+Please note that I do not provide an empty index.php file with my WordPress plugins, because security by obscurity is poor man's choice instead of using a proper configuration.
+
 ## Settings
 * Location: Enter something like Long Beach, CA or just Los Angeles. Alternatively just enter the location ID as provided on the OpenWeatherMap.org website.
 * Units: °F or °C (default).
