@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) {
  * Plugin Name:   OpenWeatherMap.org Weather Widget
  * Plugin URI:    https://www.rekow.ch
  * Description:   A weather widget featuring data provided by the OpenWeatherMap.org API.
- * Version:       1.0
+ * Version:       1.1
  * Author:        Nils Rekow
  * Author URI:    https://www.rekow.ch
  * License:
@@ -595,8 +595,28 @@ function weather_shortcode($atts) {
 
 
 /**
+ * Enqueue widget style
+ * 
+ * @return boolean
+ */
+function enqueue_weather_style() {
+	return wp_register_style("weather_widget_style", plugin_dir_url( __FILE__ ) . "/css/weather.css");
+}
+
+
+/**
+ * Register widget
+ * 
+ * @return void
+ */
+function init_weather_plugin() {
+	return register_widget("owm_weather_widget");
+}
+
+
+/**
  * Initialize actions etc.
  */
-add_action('wp_enqueue_scripts', create_function('', 'return wp_register_style("weather_widget_style", plugin_dir_url( __FILE__ ) . "/css/weather.css");'));
-add_action('widgets_init', create_function('', 'return register_widget("owm_weather_widget");'));
+add_action('wp_enqueue_scripts', 'enqueue_weather_style');
+add_action('widgets_init', 'init_weather_plugin');
 add_shortcode('weather', 'weather_shortcode');
