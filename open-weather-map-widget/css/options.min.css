@@ -1,0 +1,1 @@
+br,p{clear:both}input[type="text"].location{float:right;width:calc(100% - 7.5em)}input[type="checkbox"].use_geolocation,label.use_geolocation{position:relative;top:2px}label.not_linked{cursor:default!important}.location_notice{float:right;width:calc(100% - 8em);position:relative;bottom:1em}

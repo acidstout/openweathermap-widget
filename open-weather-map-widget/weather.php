@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) {
  * Plugin Name:   OpenWeatherMap.org Weather Widget
  * Plugin URI:    https://www.rekow.ch
  * Description:   A weather widget featuring data provided by the OpenWeatherMap.org API.
- * Version:       1.1
+ * Version:       1.2
  * Author:        Nils Rekow
  * Author URI:    https://www.rekow.ch
  * License:
@@ -26,400 +26,15 @@ if (!defined('ABSPATH')) {
  */
 
 
-/**
- * 
- * Gets weather information from OpenWeatherMap.org and prepares it for use in a WordPress widget.
- * 
- * @author nrekow
- *
- */
-class Weather {
-	// Disable debug-mode by default. 
-	public const _DEBUG      = false;
-	public const _DEBUG_JSON = false;
-	
-	// Set our OpenWeatherMap API key. This is a free account for demo purposes only. You may want to set your own key instead.
-	private $_api_key = '4ce82f11d1c28e3ba0095fa17619c0a1';
+define('OPEN_WEATHER_MAP_PLUGIN_NAME', 'open-weather-map-widget');
+define('OPEN_WEATHER_MAP_PLUGIN_DIR', plugins_url('', __FILE__));
 
-	// Set OpenWeatherMap API endpoints.
-	private $_api_urls = array(
-			'find'     => 'https://api.openweathermap.org/data/2.5/find?',
-			'today'    => 'https://api.openweathermap.org/data/2.5/weather?',
-			'forecast' => 'https://api.openweathermap.org/data/2.5/forecast?'
-	);
-	
-	private $_weather_icon_urls = array(
-			'large' => '//openweathermap.org/themes/openweathermap/assets/vendor/owm/img/widgets/',
-			'small' => '//openweathermap.org/img/w/'
-	);
-
-	// Set default settings.
-	private $_city_id        = '';
-	private $_slug           = '';
-	private $_location       = false;
-	private $_units          = 'metric';
-	private $_override_title = false;
-	private $_days_to_show   = 5;
-	private $_show_stats     = 0;
-	private $_show_link      = 0;
-	private $_weather_data   = array();
-	private	$_windSpeedUnit  = 'km/h';
-	
-	
-	/**
-	 * Constructor
-	 * 
-	 * @param array $atts
-	 */
-	public function __construct($atts) {
-		if (isset($atts['units']) && $atts['units'] == 'imperial') {
-			$this->_units = 'imperial';
-			$this->_windSpeedUnit = 'mph';
-		}
-		
-		// Check for custom API key.
-		(isset($atts['openweathermap_api_key']) && !empty($atts['openweathermap_api_key'])) ? $this->_api_key = $atts['openweathermap_api_key'] : null;
-		$this->_api_key = 'appid=' . $this->_api_key;
-		
-		// Check other options.
-		isset($atts['location'])       ? $this->_location       = $atts['location'] : null;
-		isset($atts['override_title']) ? $this->_override_title = $atts['override_title'] : null;
-		isset($atts['forecast_days'])  ? $this->_days_to_show   = $atts['forecast_days'] : null;
-		isset($atts['show_stats'])     ? $this->_show_stats     = $atts['show_stats'] : null;
-		isset($atts['show_link'])      ? $this->_show_link      = $atts['show_link'] : null;
-		
-		// Get weather data.
-		$this->_weather_data = $this->_weather_logic();
-	}
-
-	
-	/**
-	 * Function to return previously fetched weather data. Only used in the shortcode wrapper.
-	 * 
-	 * @return array|mixed|boolean|string
-	 */
-	public function getWeatherData() {
-		return $this->_weather_data;
-	}
-	
-
-	/**
-	 * In case of error, write message into log file.
-	 * Also writes message to screen.
-	 *
-	 * @param boolean $msg
-	 * @return boolean
-	 */
-	private function _weather_error($msg = false) {
-		if (!$msg) {
-			$msg = __('No weather information available', 'weather');
-		}
-		
-		error_log(print_r($msg, true), 0);
-		echo '<br/>' . $msg;
-		
-		return false;
-	}
-	
-	
-	/**
-	 * Lookup city ID by its configured name and cache the data for one month.
-	 * 
-	 * @return mixed|boolean
-	 */
-	private function _getCityId() {
-		$transient = 'weather-cityid-' . $this->_slug;
-		$url = $this->_api_urls['find'] . $this->_api_key . '&q=' . htmlspecialchars($this->_location, ENT_SUBSTITUTE);
-		
-		// Fetch cached data.
-		if (Weather::_DEBUG) {
-			error_log('Skipping transient city ID.', 0);
-		} else {
-			$id = get_transient($transient);
-		
-			if ($id) {
-				return $id;
-			}
-		}
-
-		if (Weather::_DEBUG) {
-			error_log('Updating city ID. ' . $url, 0);
-		}
-		
-		// Get fresh data (e.g. city ID).
-		$content = file_get_contents($url);
-		
-		if ($content) {
-			$data = json_decode($content);
-			
-			if (Weather::_DEBUG_JSON) {
-				error_log("Call to get city ID returned: \n" . print_r($data, true), 0);
-			}
-			
-			if (isset($data->message) && strpos($data->message, 'not found') !== false) {
-				return false;
-			}
-			
-			if (isset($data->list) && isset($data->list[0]->id)) {
-				// Cache data for one month and return it.
-				set_transient($transient, $data->list[0]->id, 2629743);
-				return $data->list[0]->id;
-			}
-		}
-		
-		return false;
-	}
-	
-	
-	/**
-	 * Fetch weather data
-	 * 
-	 * @return mixed|boolean
-	 */
-	private function _getWeatherData() {
-		$transient = 'weather-' . $this->_units . '-' . $this->_slug;
-		
-		// Fetched cached data. Contains current weather and forecast.
-		if (Weather::_DEBUG) {
-			error_log('Skipping transient weather data.', 0);
-		} else {
-			$data = get_transient($transient);
-		}
-		
-		
-		// Get fresh data (e.g. todays weather).
-		if (!isset($data['today'])) {
-			$url = $this->_api_urls['today'] . $this->_api_key . '&id=' . $this->_city_id . '&units=' . $this->_units;
-			
-			if (Weather::_DEBUG) {
-				error_log('Updating todays weather data. ' . $url, 0);
-			}
-			
-			$content = file_get_contents($url);
-			
-			if ($content) {
-				$data['today'] = json_decode($content);
-				
-				if (Weather::_DEBUG_JSON) {
-					error_log("Call to update weather data returned: \n" . print_r($data['today'], true), 0);
-				}
-			}
-		}
-		
-		
-		// Get weather forecast.
-		if (!isset($data['forecast']->list) && $this->_days_to_show > 0) {
-			$url = $this->_api_urls['forecast'] . $this->_api_key . '&id=' . $this->_city_id . '&units=' . $this->_units . '&mode=daily_compact';
-			
-			if (Weather::_DEBUG) {
-				error_log('Updating forecast for the next ' . $this->_days_to_show . ' days. ' . $url, 0);
-			}
-			
-			$content = file_get_contents($url);
-
-			if ($content) {
-				$data['forecast'] = json_decode($content);
-				
-				if (Weather::_DEBUG_JSON) {
-					error_log("Call to update forecast returned: \n" . print_r($data['forecast'], true), 0);
-				}
-			}
-		}
-		
-		// Cache weather data for 3hrs and return the data.
-		if (isset($data) && isset($data['today'])) {
-			set_transient($transient, $data, 10800);
-			return $data;
-		}
-		
-		return false;
-	}
-	
-	
-	/**
-	 * Main routine to handle all the stuff.
-	 * 
-	 * @return boolean|string
-	 */
-	private function _weather_logic() {
-		$output = '';
-		$wind_direction = '';
-		
-		// Decide which unit to use.
-		$units_display = ($this->_units == "metric") ? __('C', 'weather') : __('F', 'weather');
-
-		
-		// Return a message if no location has been set.
-		if (!$this->_location) {
-			return $this->_weather_error(__('City not set.', 'weather'));
-		}
-		
-		
-		// Lookup the city ID by its configured name.
-		$this->_slug = sanitize_title($this->_location);
-		$this->_city_id = $this->_location;
-		
-		if (!is_numeric($this->_city_id)) {
-			$this->_city_id = $this->_getCityId();
-		}
-		
-
-		// Throw an error in case $city_id still contains "invalid" data.
-		if (!$this->_city_id) {
-			return $this->_weather_error( __('City could not be found', 'weather') );
-		}
-
-		
-		// Try to fetch weather data according to configured settings.
-		$this->_weather_data = $this->_getWeatherData();
-		
-
-		// No weather data could be fetched.
-		if (!$this->_weather_data) {
-			return $this->_weather_error();
-		}
-		
-		
-		// Todays temparatures
-		$today 		= $this->_weather_data['today'];
-		$today_temp = number_format($today->main->temp, 1);
-		$today_high = number_format($today->main->temp_max, 1);
-		$today_low 	= number_format($today->main->temp_min, 1);
-		$feels		= $today->weather[0]->id;
-		
-		// Use configured city name (if it's not a city ID) instead of the name returned by the API call.
-		// This will preserve accents in the city name.
-		$header_title = (!is_numeric($this->_location)) ? $this->_location : $today->name;
-		
-		// Override location name?
-		if ($this->_override_title) {
-			$header_title = $this->_override_title;
-		}
-		
-		// The OpenWeatherMap API returns wind speed in "m/s" when requesting metric units.
-		// So, we need to convert it to "km/h". 
-		// When requesting the use of imperial units it properly returns "mph".  
-		if ($this->_units == 'metric') {
-			$today->wind->speed = $today->wind->speed * 3.6;
-		}
-		
-		$today->main->humidity = round($today->main->humidity, 1);
-		$today->wind->speed = round($today->wind->speed, 1);
-		
-		$wind_label = array (
-				__('N', 'weather'),
-				__('NNE', 'weather'),
-				__('NE', 'weather'),
-				__('ENE', 'weather'),
-				__('E', 'weather'),
-				__('ESE', 'weather'),
-				__('SE', 'weather'),
-				__('SSE', 'weather'),
-				__('S', 'weather'),
-				__('SSW', 'weather'),
-				__('SW', 'weather'),
-				__('WSW', 'weather'),
-				__('W', 'weather'),
-				__('WNW', 'weather'),
-				__('NW', 'weather'),
-				__('NNW', 'weather')
-		);
-		
-		if (isset($today->wind->deg)) {
-			$wind_direction = $wind_label[ fmod((($today->wind->deg + 11) / 22.5), 16) ];
-		}
-		
-		$show_stats_class = (!$this->_show_stats) ? 'without_stats' : '';
-		
-		
-		// Prepare widget output 
-		$output .= '<div id="weather-' . $this->_slug . '" class="weather-wrap ' . $show_stats_class . '">';
-		$output .= '<div class="weather-condition"><img src="' . $this->_weather_icon_urls['large'] . $today->weather[0]->icon. '.png" alt="' . $today->weather[0]->description . '" title="' . $today->weather[0]->description . '"/></div>';
-		$output .= '<div class="weather-header">';
-		
-		if ($this->_show_link && $this->_city_id) {
-			$output .= '<a href="http://openweathermap.org/city/' . $this->_city_id . '" target="_blank" title="' . __('Click for extended forecast', 'weather') . '">';
-		}
-		
-		$output .= $header_title;
-		
-		if ($this->_show_link && $this->_city_id) {
-			$output .= '</a>';
-		}
-		
-		$output .= '<br/>' . $today_temp . ' °' . $units_display . '</div>';
-		
-		
-		// Show weather details
-		if ($this->_show_stats) {
-			$output .= '
-				<div class="weather-todays-stats">
-					<div class="awe_desc">' . $today->weather[0]->description . '</div>
-					<div class="awe_humidty">humidity: ' . $today->main->humidity . '% </div>
-					<div class="awe_wind">wind: ' . $today->wind->speed . $this->_windSpeedUnit . ' ' . $wind_direction . '</div>
-					<div class="awe_highlow">H: ' . $today_high . ' °' . $units_display . ' &bull; L: ' . $today_low . ' °' . $units_display . ' </div>
-				</div>';
-		}
-		
-		
-		// Show forecast
-		if ($this->_days_to_show > 0) {
-			$output .= '<div class="weather-forecast days_' . $this->_days_to_show . '">';
-			$day_count = 1;
-			$dt_today = date('Ymd');
-			$forecast = $this->_weather_data['forecast'];	// Contains the actual forecast data.
-			$day_of_week = '';
-			$day_of_week_prev = '';
-			
-			foreach((array)$forecast->list as $forecast) {
-				// Get day of the week of the forecast data.
-				$day_of_week = date('D', $forecast->dt);
-				
-				// Todays date is the date in the forecast, then skip.
-				if ($dt_today >= date('Ymd', $forecast->dt)) {
-					continue;
-				}
-				
-				// Skip weather data if we already display that day.
-				if ($day_of_week == $day_of_week_prev && !empty($day_of_week_prev)) {
-					continue;
-				}
-				
-				// Skip weather data if its time is not noon.
-				if (date('Hi', $forecast->dt) != '1200') {
-					continue;
-				}
-
-				// Add forecast entry to our output.
-				$output .= '
-					<div class="weather-forecast-day" title="' . $forecast->weather[0]->description . '">
-						<div><img src="' . $this->_weather_icon_urls['small'] . $forecast->weather[0]->icon . '.png" alt=""/></div>
-						<div class="weather-forecast-day-temp">' . number_format($forecast->main->temp, 1) . ' °' . $units_display . '</div>
-						<div class="weather-forecast-day-abbr">' . $day_of_week . '</div>
-					</div>';
-				
-				// Break the foreach-loop if the number of days to display is reached.
-				if ($day_count == $this->_days_to_show) {
-					break;
-				}
-				
-				// Remember current day as the "previous" day. 
-				$day_of_week_prev = $day_of_week;
-				
-				// Count up.
-				$day_count++;
-			}
-			
-			$output .= '</div>';
-		}
-		
-		$output .= '</div>';	// Close <div id="weather-' . $this->_slug . '" ...>
-		return $output;
-	}
-}
+$minified = (defined('WP_DEBUG') && WP_DEBUG === true) ? '' : '.min';
 
 
 
+include_once 'include/openweathermap.class.php';
+use OpenWeatherMap\Weather;
 
 /**
  * 
@@ -451,31 +66,47 @@ class owm_weather_widget extends WP_Widget {
 		
 		wp_enqueue_style('weather_widget_style');
 		
-		$location 		= isset($instance['location']) ? $instance['location'] : false;
-		$owm_api_key	= isset($instance['openweathermap_api_key']) ? $instance['openweathermap_api_key'] : '';
-		$override_title	= isset($instance['override_title']) ? $instance['override_title'] : false;
-		$units 			= isset($instance['units']) ? $instance['units'] : false;
-		$forecast_days 	= isset($instance['forecast_days']) ? $instance['forecast_days'] : false;
-		$show_stats 	= isset($instance['show_stats']) ? $instance['show_stats'] : 0;
-		$show_link 		= isset($instance['show_link']) ? $instance['show_link'] : 0;
+		$location 		 = isset($instance['location']) ? $instance['location'] : false;
+		$use_geolocation = isset($instance['use_geolocation']) ? $instance['use_geolocation'] : false;
+		$owm_api_key	 = isset($instance['openweathermap_api_key']) ? $instance['openweathermap_api_key'] : '';
+		$override_title	 = isset($instance['override_title']) ? $instance['override_title'] : false;
+		$units 			 = isset($instance['units']) ? $instance['units'] : false;
+		$forecast_days 	 = isset($instance['forecast_days']) ? $instance['forecast_days'] : false;
+		$show_stats 	 = isset($instance['show_stats']) ? $instance['show_stats'] : 0;
+		$show_link 		 = isset($instance['show_link']) ? $instance['show_link'] : 0;
 
 		echo $before_widget;
 		
-		// Create a new Weather object
-		$weather = new Weather(
-			array(
-				'location' => $location,
-				'openweathermap_api_key' => $owm_api_key,
-				'override_title' => $override_title,
-				'units' => $units,
-				'forecast_days' => $forecast_days,
-				'show_stats' => $show_stats,
-				'show_link' => $show_link
-			)
-		);
-		
-		// Get weather data.
-		echo $weather->getWeatherData();
+		if ($use_geolocation) {?>
+			<script type="text/javascript">
+				var OpenWeatherMapWidget = '<?php echo OPEN_WEATHER_MAP_PLUGIN_DIR;?>/weather-ajax.php';
+				var OpenWeatherMapWidgetData = 'geolocation=1&ajax=1&apikey=<?php echo $owm_api_key;
+						?>&title=<?php echo $override_title;
+						?>&units=<?php echo $units;
+						?>&forecast=<?php echo $forecast_days;
+						?>&stats=<?php echo $show_stats;
+						?>&link=<?php echo $show_link;
+						?>';
+			</script>
+			<div id="weather-geolocation"></div><?php
+			wp_enqueue_script('weather_widget_script');
+		} else {
+			// Create a new Weather object
+			$weather = new Weather(
+				array(
+					'location' => $location,
+					'openweathermap_api_key' => $owm_api_key,
+					'override_title' => $override_title,
+					'units' => $units,
+					'forecast_days' => $forecast_days,
+					'show_stats' => $show_stats,
+					'show_link' => $show_link
+				)
+			);
+			
+			// Get weather data.
+			echo $weather->getWeatherData();
+		}
 		
 		echo $after_widget;
 	}
@@ -489,7 +120,8 @@ class owm_weather_widget extends WP_Widget {
 	 */
 	public function update($new_instance, $old_instance) {
 		$instance = $old_instance;
-		$instance['location']               = trim(strip_tags($new_instance['location']));
+		$instance['location']               = isset($new_instance['location']) ? trim(strip_tags($new_instance['location'])) : $old_instance['location'];
+		$instance['use_geolocation']        = isset($new_instance['use_geolocation']) ? trim(strip_tags($new_instance['use_geolocation'])) : 0;
 		$instance['openweathermap_api_key'] = trim(strip_tags($new_instance['openweathermap_api_key']));
 		$instance['override_title']         = trim(strip_tags($new_instance['override_title']));
 		$instance['units']                  = trim(strip_tags($new_instance['units']));
@@ -507,14 +139,17 @@ class owm_weather_widget extends WP_Widget {
 	 * {@inheritDoc}
 	 * @see WP_Widget::form()
 	 */
-	public function form($instance) {	
-		$location       = isset($instance['location']) ? esc_attr($instance['location']) : '';
-		$owm_api_key    = isset($instance['openweathermap_api_key']) ? esc_attr($instance['openweathermap_api_key']) : '';
-		$override_title = isset($instance['override_title']) ? esc_attr($instance['override_title']) : '';
-		$units          = isset($instance['units']) ? esc_attr($instance['units']) : 'metric';
-		$forecast_days  = isset($instance['forecast_days']) ? esc_attr($instance['forecast_days']) : 5;
-		$show_stats     = (isset($instance['show_stats']) AND $instance['show_stats'] == 1) ? 1 : 0;
-		$show_link      = (isset($instance['show_link']) AND $instance['show_link'] == 1) ? 1 : 0;
+	public function form($instance) {
+		global $minified;
+		
+		$location        = isset($instance['location']) ? esc_attr($instance['location']) : '';
+		$use_geolocation = (isset($instance['use_geolocation']) && $instance['use_geolocation'] == 1) ? 1 : 0;
+		$owm_api_key     = isset($instance['openweathermap_api_key']) ? esc_attr($instance['openweathermap_api_key']) : '';
+		$override_title  = isset($instance['override_title']) ? esc_attr($instance['override_title']) : '';
+		$units           = isset($instance['units']) ? esc_attr($instance['units']) : 'metric';
+		$forecast_days   = isset($instance['forecast_days']) ? esc_attr($instance['forecast_days']) : 5;
+		$show_stats      = (isset($instance['show_stats']) && $instance['show_stats'] == 1) ? 1 : 0;
+		$show_link       = (isset($instance['show_link']) && $instance['show_link'] == 1) ? 1 : 0;
 		
 		$avail_forecasts = array(
 				0 => __('Disabled', 'weather'),
@@ -526,24 +161,26 @@ class owm_weather_widget extends WP_Widget {
 		);
 		
 		$checked_imperial = '';
-		$checked_metric = 'checked';
+		$checked_metric = 'checked="checked"';
 		
 		if ($units == 'imperial') {
-			$checked_imperial = 'checked';
+			$checked_imperial = 'checked="checked"';
 			$checked_metric = '';
 		}
-		
 		?>
 		<p>
-			<label for="<?php echo $this->get_field_id('location');?>"><?php _e('Location:', 'weather');?></label> 
-			<input class="widefat" id="<?php echo $this->get_field_id('location');?>" name="<?php echo $this->get_field_name('location');?>" type="text" value="<?php echo $location;?>" placeholder="<?php _e('Enter city name', 'weather');?>"/><br/>
-			<a href="https://openweathermap.org/" target="_blank">Use this link to find your city.</a>
+			<label for="<?php echo $this->get_field_id('location');?>"><?php _e('Location:', 'weather');?></label><br/>
+			<input class="use_geolocation" id="<?php echo $this->get_field_name('use_geolocation');?>" name="<?php echo $this->get_field_name('use_geolocation');?>" type="checkbox" value="1" <?php if ($use_geolocation) echo 'checked="checked"';?>/>
+			<label class="use_geolocation" for="<?php echo $this->get_field_name('use_geolocation');?>"><?php _e('Automatic', 'weather')?></label>
+			<input class="location" id="<?php echo $this->get_field_id('location');?>" name="<?php echo $this->get_field_name('location');?>" type="text" value="<?php echo $location;?>" placeholder="<?php _e('Enter city name', 'weather');?>" <?php if ($use_geolocation) echo 'disabled="disabled"';?>/>
+			<br/>
 		</p>
+		<div class="location_notice"><a href="https://openweathermap.org/" target="_blank">Use this link to find your city.</a></div>
 
 		<p>
-			<label for="<?php echo $this->get_field_id('units');?>"><?php _e('Units:', 'weather');?></label> &nbsp;
-			<input id="<?php echo $this->get_field_id('units');?>" name="<?php echo $this->get_field_name('units');?>" type="radio" value="imperial" <?php echo $checked_imperial;?>/>°F &nbsp; &nbsp;
-			<input id="<?php echo $this->get_field_id('units');?>" name="<?php echo $this->get_field_name('units');?>" type="radio" value="metric" <?php echo $checked_metric;?>/>°C
+			<label class="not_linked"><?php _e('Units:', 'weather');?></label> &nbsp;
+			<input id="<?php echo $this->get_field_id('units');?>_f" name="<?php echo $this->get_field_name('units');?>" type="radio" value="imperial" <?php echo $checked_imperial;?>/><label for="<?php echo $this->get_field_id('units');?>_f">°F</label> &nbsp; &nbsp;
+			<input id="<?php echo $this->get_field_id('units');?>_c" name="<?php echo $this->get_field_name('units');?>" type="radio" value="metric" <?php echo $checked_metric;?>/><label for="<?php echo $this->get_field_id('units');?>_c">°C</label>
 		</p>
 		
 		<p>
@@ -570,14 +207,17 @@ class owm_weather_widget extends WP_Widget {
 		</p>
 
 		<p>
-			<label for="<?php echo $this->get_field_id('show_stats');?>"><?php _e('Show details:', 'weather');?></label>  &nbsp;
-			<input id="<?php echo $this->get_field_id('show_stats');?>" name="<?php echo $this->get_field_name('show_stats');?>" type="checkbox" value="1" <?php if($show_stats) echo ' checked="checked"';?> />
+			<input id="<?php echo $this->get_field_id('show_stats');?>" name="<?php echo $this->get_field_name('show_stats');?>" type="checkbox" value="1" <?php if($show_stats) echo ' checked="checked"';?>/>
+			<label for="<?php echo $this->get_field_id('show_stats');?>"><?php _e('Show details', 'weather');?></label>
 		</p>
 		
 		<p>
-			<label for="<?php echo $this->get_field_id('show_link');?>"><?php _e('Link to extended forecast:', 'weather');?></label>  &nbsp;
-			<input id="<?php echo $this->get_field_id('show_link');?>" name="<?php echo $this->get_field_name('show_link');?>" type="checkbox" value="1" <?php if($show_link) echo ' checked="checked"';?> />
-		</p><?php 
+			<input id="<?php echo $this->get_field_id('show_link');?>" name="<?php echo $this->get_field_name('show_link');?>" type="checkbox" value="1" <?php if($show_link) echo ' checked="checked"';?>/>
+			<label for="<?php echo $this->get_field_id('show_link');?>"><?php _e('Link to extended forecast', 'weather');?></label>
+		</p>
+		<link rel="stylesheet" type="text/css" href="<?php echo OPEN_WEATHER_MAP_PLUGIN_DIR;?>/css/options<?php echo $minified;?>.css"/>
+		<script type="text/javascript" src="<?php echo OPEN_WEATHER_MAP_PLUGIN_DIR;?>/js/options<?php echo $minified;?>.js"></script>
+		<?php 
 	}
 }
 
@@ -600,7 +240,19 @@ function weather_shortcode($atts) {
  * @return boolean
  */
 function enqueue_weather_style() {
-	return wp_register_style("weather_widget_style", plugin_dir_url( __FILE__ ) . "/css/weather.css");
+	global $minified;
+	return wp_register_style('weather_widget_style', OPEN_WEATHER_MAP_PLUGIN_DIR . '/css/weather' . $minified . '.css');
+}
+
+
+/**
+ * Enqueue widget javascript
+ * 
+ * @return boolean
+ */
+function enqueue_weather_script() {
+	global $minified;
+	return wp_register_script('weather_widget_script', OPEN_WEATHER_MAP_PLUGIN_DIR . '/js/weather' . $minified . '.js');
 }
 
 
@@ -614,9 +266,32 @@ function init_weather_plugin() {
 }
 
 
+function register_settings() {
+	$settings = array(
+			'location',
+			'use_geolocation',
+			'openweathermap_api_key',
+			'override_title',
+			'units',
+			'forecast_days',
+			'show_stats',
+			'show_link'
+	);
+	
+	foreach ($settings as $setting) {
+		register_setting(OPEN_WEATHER_MAP_PLUGIN_NAME, $setting);
+	}
+}
+
+
 /**
  * Initialize actions etc.
  */
 add_action('wp_enqueue_scripts', 'enqueue_weather_style');
+add_action('wp_enqueue_scripts', 'enqueue_weather_script');
 add_action('widgets_init', 'init_weather_plugin');
 add_shortcode('weather', 'weather_shortcode');
+
+if (is_admin()) {
+	add_action('admin_init', 'register_settings');
+}
