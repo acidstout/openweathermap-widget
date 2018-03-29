@@ -2,7 +2,7 @@
 A weather widget for WordPress featuring data provided by the OpenWeatherMap.org API. See (https://openweathermap.org) for details.
 
 ## Description
-The plugin parses data from the OpenWeatherMap.org API to display weather information of a given location. All weather data is cached at least for three hours.
+The plugin parses data returned by the OpenWeatherMap.org API to display weather information of a given location. All weather data is cached at least for three hours, unless you use the geolocation feature (not cached).
 Use as a widget or add a shortcode like this (e.g. in posts, ...):
 
 `[weather location="London, UK" units="imperial" override_title="Weather" forecast_days="0" show_stats="false"]`
@@ -21,7 +21,7 @@ The provided API key is connected to a free account for demo purposes only. In o
 Please note that I do not provide an empty index.php file with my WordPress plugins, because security by obscurity is poor man's choice instead of using a proper configuration.
 
 ## Settings
-* Location: Enter something like Long Beach, CA or just Los Angeles. Alternatively just enter the location ID as provided on the OpenWeatherMap.org website.
+* Location: Enter something like Long Beach, CA or just Los Angeles. Alternatively enter the location ID as provided on the OpenWeatherMap.org website. To use the browser's geolocation capabilities enable the "automatic" option. This will disable the location input field.
 * Units: °F or °C (default).
 * Forecast: Shows forecast weather information for the configured number of days.
 * Override location title: Change the title of the location.
