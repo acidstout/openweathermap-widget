@@ -34,5 +34,8 @@ Please note that I do not provide an empty index.php file with my WordPress plug
 2. Activate the plugin.
 3. Use a shortcode or the widget.
 
+## Privacy policy
+This widget itself does not collect, store or analyze any personal data. However, by using the OpenWeatherMap.org API such data may be transferred to or requested by OpenWeatherMap.org in order to provide you weather information of the location information you provided. For details please see their privacy policy at https://openweathermap.org/privacy-policy
+
 ## License
 This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or (at your option) any later version. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with this program; if not, write to the Free Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA. Further details on this license can be found [here](https://www.gnu.org/licenses/gpl-3.0.html).
